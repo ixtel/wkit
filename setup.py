@@ -1,0 +1,30 @@
+from setuptools import setup, find_packages
+import os
+
+"""
+with open('selection/version.py') as f:
+    code = compile(f.read(), 'version.py', 'exec')
+    exec(code, None, None)
+"""
+ROOT = os.path.dirname(os.path.realpath(__file__))
+
+setup(
+    name = 'moskit',
+    version = '0.0.1',
+    description = 'Qt WebKit API',
+    long_description = open(os.path.join(ROOT, 'README.rst')).read(),
+    author = 'Gregory Petukhov',
+    author_email = 'lorien@lorien.name',
+    install_requires = [],
+    packages = ['moskit', 'script', 'test'],
+    license = "MIT",
+    classifiers = (
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'License :: OSI Approved :: MIT License',
+        'Topic :: Software Development :: Libraries :: Application Frameworks',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+    ),
+)
