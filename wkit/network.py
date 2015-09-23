@@ -9,6 +9,10 @@ from PyQt4.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkProx
 from PyQt4.QtWebKit import QWebFrame
 from PyQt4.QtCore import QByteArray, QUrl
 import six
+from fnmatch import fnmatch
+from copy import copy
+from urllib.parse import urlsplit
+import zlib
 
 from wkit.const import NETWORK_ERRORS
 from wkit.error import WKitError
@@ -18,10 +22,11 @@ logger = logging.getLogger('wkit.network')
 
 
 @log_errors
-def handle_reply_ready_read(reply):
+def handle_reply_ready_read(reply, traffic_rules):
     ct = reply.rawHeader('Content-Type').data().decode('latin')
-    if ct.startswith('image/'):
-        logger.debug('ABORTING %s' % reply.url().toString())
+    abort_ctype = traffic_rules.get('abort_content_type', [])
+    if any(fnmatch(ct, x) for x in abort_ctype):
+        logger.debug('ABORT REPLY %s' % reply.url().toString())
         reply.abort()
     else:
         if not hasattr(reply, 'data'):
@@ -31,11 +36,12 @@ def handle_reply_ready_read(reply):
 
 class WKitNetworkAccessManager(QNetworkAccessManager):
     @log_errors
-    def __init__(self, forbidden_extensions=None):
-        if forbidden_extensions is None:
-            forbidden_extensions = []
+    def __init__(self, traffic_rules=None):
+        if traffic_rules is None:
+            self.traffic_rules = {}
+        else:
+            self.traffic_rules = traffic_rules
         QNetworkAccessManager.__init__(self)
-        self.forbidden_extensions = forbidden_extensions
 
     @log_errors
     def setup_cache(self, size=100 * 1024 * 1024, location='/tmp/.webkit_wrapper'):
@@ -86,27 +92,30 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
                 suffix = ''
             logger.debug('%s %s%s' % (method.upper(), req_url, suffix))
         else:
-            logger.debug('FORBIDDEN %s' % req_url)
+            logger.debug('REJECT REQ %s' % req_url)
         
         request.setAttribute(QNetworkRequest.CacheLoadControlAttribute,
                              QNetworkRequest.PreferCache)
+
+        #request.setRawHeader('Accept-Encoding', 'gzip')
         reply = QNetworkAccessManager.createRequest(self, operation, request, data)
         reply.error.connect(self.handle_network_reply_error)
-        reply.readyRead.connect(lambda x=reply: handle_reply_ready_read(x))
+
+        reply.readyRead.connect(lambda x=reply, y=copy(self.traffic_rules):\
+                                handle_reply_ready_read(x, y))
         return reply
 
     @log_errors
     def is_request_allowed(self, request):
-        path = six.u(request.url().path())
-        if path and '.' in path:
-            ext = path.rsplit('.', 1)[-1].lower()
-        else:
-            ext = ''
-
-        if ext and ext in self.forbidden_extensions:
+        url = request.url().toString() 
+        path = urlsplit(url).path
+        reject_url = self.traffic_rules.get('reject_url', [])
+        if any(fnmatch(url, x) for x in reject_url):
             return False
-        else:
-            return True
+        reject_path = self.traffic_rules.get('reject_path', [])
+        if any(fnmatch(path, x) for x in reject_path):
+            return False
+        return True
 
     @log_errors
     def handle_network_reply_error(self, err_code):

@@ -3,35 +3,25 @@ Credits:
 * https://code.google.com/p/webscraping/source/browse/webkit.py
 * https://github.com/jeanphix/Ghost.py/blob/master/ghost/ghost.py
 """
-'''
-from PyQt5.QtCore import QEventLoop, QUrl, QEventLoop, QTimer, QByteArray, QSize
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtWebKitWidgets import QWebView, QWebPage
-from PyQt5.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
-                             QNetworkCookieJar, QNetworkCookie)
-from PyQt5.QtCore import qInstallMessageHandler
-from PyQt5.QtCore import QtDebugMsg, QtWarningMsg, QtCriticalMsg, QtFatalMsg
-'''
-from PyQt4.QtCore import QEventLoop, QUrl, QEventLoop, QTimer, QByteArray, QSize
+from PyQt4.QtCore import (QEventLoop, QUrl, QTimer, QByteArray,
+                          QSize, qInstallMsgHandler, QtDebugMsg, QtWarningMsg,
+                          QtCriticalMsg, QtFatalMsg)
 from PyQt4.QtGui import QApplication
 from PyQt4.QtWebKit import QWebView, QWebPage
 from PyQt4.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                              QNetworkCookieJar, QNetworkCookie)
-from PyQt4.QtCore import qInstallMsgHandler
-from PyQt4.QtCore import QtDebugMsg, QtWarningMsg, QtCriticalMsg, QtFatalMsg
 import logging
 from six.moves.urllib.parse import urlsplit
-from weblib.encoding import decode_dict
-import six
-import time
 from collections import Counter
 
 from wkit.network import WKitNetworkAccessManager
 from wkit.error import WKitError
 from wkit.logger import configure_logger
-from wkit.document import Document
+from wkit.response import HttpResponse
+import wkit
 
 logger = logging.getLogger('wkit')
+DEFAULT_USER_AGENT = 'WKit %s' % wkit.__version__
 
 
 class QTMessageProxy(object):
@@ -55,22 +45,6 @@ qt_logger = configure_logger('qt', 'QT', logging.DEBUG, logging.StreamHandler())
 qInstallMsgHandler(QTMessageProxy(qt_logger))
 
 
-class HttpResource(object):
-    def __init__(self, reply):
-        self.url = str(reply.url().toString())
-        self.status_code = \
-            reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-        if not isinstance(self.status_code, int):
-            self.status_code = self.status_code.toInt()[0]
-        self.headers = {}
-        for header in reply.rawHeaderList():
-            self.headers[header.data()] = bytes(reply.rawHeader(header))
-        try:
-            self.content = reply.data
-        except AttributeError:
-            self.content = reply.readAll()
-
-
 class WKitWebView(QWebView):
     def setApplication(self, app):
         self.app = app
@@ -84,15 +58,11 @@ class WKitWebView(QWebView):
 
 
 class WKitWebPage(QWebPage):
-    def __init__(self, *args, **kwargs):
-        QWebPage.__init__(self)
-        self.user_agent = 'QtWebKitWrapper'
+    def set_user_agent(self, ua):
+        self.user_agent = ua
 
     def userAgentForUrl(self, url):
-        if self.user_agent is None:
-            return super(WebPage, self).userAgentForUrl(url)
-        else:
-            return self.user_agent
+        return self.user_agent
 
     def shouldInterruptJavaScript(self):
         return True
@@ -112,11 +82,11 @@ class WKitWebPage(QWebPage):
 class Browser(object):
     _app = None
 
-    def __init__(self, gui=False):
+    def __init__(self, gui=False, traffic_rules=None):
         if not Browser._app:
             Browser._app = QApplication([])
 
-        self.manager = WKitNetworkAccessManager()
+        self.manager = WKitNetworkAccessManager(traffic_rules=traffic_rules)
         self.manager.finished.connect(self.handle_finished_network_reply)
 
         self.cookie_jar = QNetworkCookieJar()
@@ -141,7 +111,7 @@ class Browser(object):
     def go(self, url, **kwargs):
         return self.request(url=url, **kwargs)
 
-    def request(self, url=None, user_agent='Mozilla', cookies=None, timeout=10,
+    def request(self, url=None, user_agent=None, cookies=None, timeout=10,
                 method='get', data=None, headers=None, proxy=None):
         if cookies is None:
             cookies = {}
@@ -150,20 +120,14 @@ class Browser(object):
         url_info = urlsplit(url)
 
         self.resource_list = []
-        loop = QEventLoop()
-        self.view.loadFinished.connect(loop.quit)
 
         if proxy:
             self.manager.setup_proxy(proxy)
 
-        # Timeout
-        timer = QTimer()
-        timer.setSingleShot(True)
-        timer.timeout.connect(loop.quit)
-        timer.start(timeout * 1000)
-
         # User-Agent
-        self.page.user_agent = user_agent
+        if user_agent is None:
+            user_agent = DEFAULT_USER_AGENT
+        self.page.set_user_agent(user_agent)
 
         # Cookies
         cookie_obj_list = []
@@ -199,37 +163,25 @@ class Browser(object):
         self.content_type_stats = Counter()
         self.view.load(request_obj, method_obj, data)
 
+        # Set up Timer and spawn request
+        loop = QEventLoop()
+        self.view.loadFinished.connect(loop.quit)
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+        timer.start(timeout * 1000)
         loop.exec_()
-
         if timer.isActive():
             request_resource = None
-            url = str(self.page.mainFrame().url().toString()).rstrip('/')
+            url = self.page.mainFrame().url().toString().rstrip('/')
             for res in self.resource_list:
-                if url == res.url or url == res.url.rstrip('/'):
-                    request_resource = res
-                    break
-            if request_resource:
-                return self.build_document(request_resource)
-            else:
-                raise WKitError('Request was successful but it is not possible'
-                                ' to associate the request to one of received'
-                                ' responses')
+                if url == res.url.rstrip('/'):
+                    return res
+            raise WKitError('Request was successful but it is not possible'
+                            ' to associate the request to one of received'
+                            ' responses')
         else:
             raise WKitError('Timeout while loading %s' % url)
-
-    def build_document(self, res):
-        doc = Document()
-        doc.body = res.content
-        doc.status_code = res.status_code
-        doc.url = res.url
-        doc.headers = decode_dict(res.headers)
-        doc.cookies = decode_dict(self.get_cookies())
-        doc.parse()
-        doc.page = self.page
-        return doc
-
-    #def __del__(self):
-    #    self.view.setPage(None)
 
     def handle_finished_network_reply(self, reply):
         status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
@@ -238,11 +190,7 @@ class Browser(object):
                 status_code = status_code.toInt()[0]
             logger.debug('HttpResource [%d]: %s' % (status_code,
                                                 reply.url().toString()))
-            try:
-                data = reply.data
-            except AttributeError:
-                data = reply.readAll()
-            self.resource_list.append(HttpResource(reply))
+            self.resource_list.append(HttpResponse.build_from_reply(reply))
             ctype = reply.rawHeader('Content-Type').data()\
                          .decode('latin').split(';')[0]
             self.content_type_stats[ctype] += 1

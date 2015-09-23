@@ -5,11 +5,16 @@ from multiprocessing import Process
 
 from wkit import Browser
 
-GUI = True
+GUI = 0
 
 
 def click(url=None, proxy=None):
-    br = Browser(gui=GUI)
+    traffic_rules = {
+        'reject_url': [],
+        'reject_path': [],
+        'abort_content_type': ['image/*'],
+    }
+    br = Browser(gui=GUI, traffic_rules=traffic_rules)
     doc = br.go(url, timeout=20, proxy=proxy)
     try:
         print(doc.select('//title').text())
@@ -27,15 +32,23 @@ def main(**kwargs):
 
     urls = [
         'http://yandex.ru/',
-        'http://mail.ru/',
+        #'http://mail.ru/',
     ]
 
     pool = []
     for url in urls:
         pro = Process(target=click, kwargs={'url': url,
                                             'proxy': proxy.get_address()})
+        pro._start_time = time.time()
+        pro.daemon = True
         pro.start()
         pool.append(pro)
 
-    for pro in pool:
-        pro.join()
+    TIMEOUT = None
+    while True:
+        if not pro.is_alive():
+            break
+        else:
+            time.sleep(0.5)
+            if TIMEOUT and time.time() - pro._start_time > TIMEOUT:
+                pro.terminate()
