@@ -1,22 +1,17 @@
 from setuptools import setup, find_packages
 import os
 
-"""
-with open('selection/version.py') as f:
-    code = compile(f.read(), 'version.py', 'exec')
-    exec(code, None, None)
-"""
 ROOT = os.path.dirname(os.path.realpath(__file__))
 
 setup(
-    name = 'moskit',
+    name = 'wkit',
     version = '0.0.1',
-    description = 'Qt WebKit API',
+    description = 'Qt WebKit Wrapper for web scraping',
     long_description = open(os.path.join(ROOT, 'README.rst')).read(),
     author = 'Gregory Petukhov',
     author_email = 'lorien@lorien.name',
-    install_requires = [],
-    packages = ['moskit', 'script', 'test'],
+    install_requires = ('six',),
+    packages = ('wkit', 'weblib'),
     license = "MIT",
     classifiers = (
         'Programming Language :: Python',

@@ -1,16 +1,14 @@
 flake:
-	flake8 moskit test
+	flake8 wkit test
 
 flake_verbose:
-	flake8 moskit test --show-pep8
+	flake8 wkit test --show-pep8
 
 test:
-	run test
+	py.test
 
 coverage:
-	coverage erase
-	coverage run --source=moskit -m runscript.cli test
-	coverage report -m
+	py.test --cov weblib --cov-report term-missing
 
 clean:
 	find -name '*.pyc' -delete
@@ -18,5 +16,13 @@ clean:
 
 upload:
 	python setup.py sdist upload
+
+build: venv deps
+
+venv:
+	virtualenv --system-site-packages --python=python3.4 .env
+	
+deps:
+	.env/bin/pip install -r requirements.txt
 
 .PHONY: all build venv flake test vtest testloop cov clean doc

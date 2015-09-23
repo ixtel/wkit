@@ -1,19 +1,24 @@
-"""
-I really have no idea how it works ;-)
-"""
+import logging
+'''
+from PyQt5.QtNetwork import QNetworkReply
+'''
+#from PyQt5.QtNetwork import QNetworkReply, QNetworkRequest
 from PyQt4.QtNetwork import QNetworkReply, QNetworkRequest
 
-from grab.util.py3k_support import *
+from wkit.logger import log_errors
+
+logger = logging.getLogger('wkit.network')
 
 
-class KitNetworkReply(QNetworkReply):
+class WKitNetworkReply(QNetworkReply):
     """
     Override QNetworkReply so can save the original data
 
     Credits:
-    * https://code.google.com/p/webscraping/source/browse/webkit.py#154
+    * https://bitbucket.org/richardpenman/webscraping/src/tip/webkit.py#webkit.py-156
     * http://gitorious.org/qtwebkit/performance/blobs/master/host-tools/mirror/main.cpp
     """
+    @log_errors
     def __init__(self, parent, original_reply):
         QNetworkReply.__init__(self, parent)
         self.original_reply = original_reply # reply to proxy
@@ -30,6 +35,7 @@ class KitNetworkReply(QNetworkReply):
         self.original_reply.uploadProgress.connect(self.uploadProgress)
         self.original_reply.downloadProgress.connect(self.downloadProgress)
 
+    @log_errors
     def __getattribute__(self, attr):
         """Send undefined methods straight through to proxied reply
         """
@@ -41,12 +47,15 @@ class KitNetworkReply(QNetworkReply):
         #print attr, value
         return value
     
+    @log_errors
     def abort(self):
         pass  # qt requires that this be defined
     
+    @log_errors
     def isSequential(self):
         return True
 
+    @log_errors
     def applyMetaData(self):
         for header in self.original_reply.rawHeaderList():
             self.setRawHeader(header, self.original_reply.rawHeader(header))
@@ -56,7 +65,7 @@ class KitNetworkReply(QNetworkReply):
             QNetworkRequest.ContentLengthHeader,
             QNetworkRequest.LocationHeader,
             QNetworkRequest.LastModifiedHeader,
-            QNetworkRequest.SetCookieHeader,
+            #QNetworkRequest.SetCookieHeader,
         )
         for header in headers:
             self.setHeader(header, self.original_reply.header(header))
@@ -78,6 +87,7 @@ class KitNetworkReply(QNetworkReply):
         #self.setAttribute(QNetworkRequest.DoNotBufferUploadDataAttribute, self.original_reply.attribute(QNetworkRequest.DoNotBufferUploadDataAttribute))
         self.metaDataChanged.emit()
 
+    @log_errors
     def bytesAvailable(self):
         """
         How many bytes in the buffer are available to be read
@@ -85,6 +95,7 @@ class KitNetworkReply(QNetworkReply):
 
         return len(self.buffer) + QNetworkReply.bytesAvailable(self)
 
+    @log_errors
     def readInternal(self):
         """
         New data available to read
@@ -95,6 +106,7 @@ class KitNetworkReply(QNetworkReply):
         self.buffer += s
         self.readyRead.emit()
 
+    @log_errors
     def readData(self, size):
         """
         Return up to size bytes from buffer
@@ -102,8 +114,7 @@ class KitNetworkReply(QNetworkReply):
 
         size = min(size, len(self.buffer))
         data, self.buffer = self.buffer[:size], self.buffer[size:]
-        # py3 hack
-        if PY3K:
-            return bytes(data)
+        if isinstance(data, str):
+            return data.encode('utf-8')
         else:
-            return str(data)
+            return bytes(data)

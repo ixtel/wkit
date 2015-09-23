@@ -1,41 +1,16 @@
-#!/usr/bin/env python
-# coding: utf-8
-import unittest
-import sys
-from copy import copy
-import os
+import logging
+import time
+from grab.proxylist import ProxyList
 
-TEST_LIST = (
-    'test.basic',
-)
-
-def setup_arg_parser(parser):
-    parser.add_argument('-t', '--test-only', help='Run only specified tests')
+from wkit import Browser
 
 
-def main(test_only, **kwargs):
-    if test_only:
-        test_list = [test_only]
-    else:
-        test_list = TEST_LIST
+def main(**kwargs):
+    pl = ProxyList()
+    pl.load_file('/web/proxy-us.txt')
+    proxy = pl.get_random_proxy()
+    logging.basicConfig(level=logging.DEBUG)
 
-    # Ensure that all test modules are imported correctly
-    for path in test_list:
-        __import__(path, None, None, ['foo'])
-
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    for path in test_list:
-        mod_suite = loader.loadTestsFromName(path)
-        for some_suite in mod_suite:
-            for test in some_suite:
-                suite.addTest(test)
-
-    runner = unittest.TextTestRunner()
-
-    result = runner.run(suite)
-
-    if result.wasSuccessful():
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    br = Browser(gui=False)
+    doc = br.go('http://formyip.com', proxy=proxy.get_address())
+    print(doc.select('//title').text())

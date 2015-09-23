@@ -1,4 +1,4 @@
-NETWORK_ERROR = {
+NETWORK_ERRORS = {
     0: 'no error condition. Note: When the HTTP protocol returns a redirect no error will be reported. You can check if there is a redirect with the QNetworkRequest::RedirectionTargetAttribute attribute.',
 
     1: 'the remote server refused the connection (the server is not accepting requests)',
