@@ -14,7 +14,8 @@ Installation
 
 .. code:: sh
 
-    sudo apt-get install python3-pyqt5 python3-pyqt5.qtwebkit
+    #sudo apt-get install python3-pyqt5 python3-pyqt5.qtwebkit
+    sudo apt-get install python3-pyqt4
 
 Usage Example
 =============

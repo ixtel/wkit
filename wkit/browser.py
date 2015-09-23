@@ -23,18 +23,15 @@ import logging
 from six.moves.urllib.parse import urlsplit
 from weblib.encoding import decode_dict
 import six
-import re
 import time
-from lxml.html import fromstring
+from collections import Counter
 
 from wkit.network import WKitNetworkAccessManager
 from wkit.error import WKitError
-from wkit.html import find_document_encoding
 from wkit.logger import configure_logger
-from selection import XpathSelector
+from wkit.document import Document
 
 logger = logging.getLogger('wkit')
-RE_CTYPE_CHARSET = re.compile(r'charset=([-a-zA-Z0-9]+)')
 
 
 class QTMessageProxy(object):
@@ -58,42 +55,6 @@ qt_logger = configure_logger('qt', 'QT', logging.DEBUG, logging.StreamHandler())
 qInstallMsgHandler(QTMessageProxy(qt_logger))
 
 
-class Document(object):
-    def __init__(self):
-        self._dom_tree = None
-
-    def parse(self):
-        self.encoding = self.detect_encoding()
-
-    def unicode_body(self):
-        return bytes(self.body).decode(self.encoding, 'ignore')
-
-    def live_body(self):
-        return self._page.mainFrame().toHtml()
-
-    def detect_encoding(self):
-        enc = find_document_encoding(self.body)
-        if not enc:
-            ctype = self.headers.get('Content-Type', '')
-            try:
-                enc = RE_CTYPE_CHARSET.search(ctype).group(1)
-            except AttributeError:
-                pass
-        if not enc:
-            enc = 'utf-8'
-        return enc
-
-    @property
-    def dom_tree(self):
-        if self._dom_tree is None:
-            self._dom_tree = fromstring(self.unicode_body())
-        return self._dom_tree
-
-    def select(self, xpath):
-        sel = XpathSelector(self.dom_tree)
-        return sel.select(xpath)
-
-
 class HttpResource(object):
     def __init__(self, reply):
         self.url = str(reply.url().toString())
@@ -103,7 +64,7 @@ class HttpResource(object):
             self.status_code = self.status_code.toInt()[0]
         self.headers = {}
         for header in reply.rawHeaderList():
-            self.headers[header.data()] = reply.rawHeader(header).data()
+            self.headers[header.data()] = bytes(reply.rawHeader(header))
         try:
             self.content = reply.data
         except AttributeError:
@@ -137,16 +98,15 @@ class WKitWebPage(QWebPage):
         return True
 
     def javaScriptAlert(self, frame, msg):
-        logger.error(u'JavaScript Alert: %s' % unicode(msg))
-
+        logger.error('JS ALERT: %s' % msg) 
     def javaScriptConfirm(self, frame, msg):
-        logger.error(u'JavaScript Confirm: %s' % unicode(msg))
+        logger.error('JS CONFIRM: %s' % msg)
 
     def javaScriptPrompt(self, frame, msg, default):
-        logger.error(u'JavaScript Prompt: %s' % unicode(msg))
+        logger.error('JS PROMPT: %s' % msg)
 
     def javaScriptConsoleMessage(self, msg, line_number, src_id):
-        logger.error(u'JavaScript Console Message: %s' % unicode(msg))
+        logger.error('JS CONSOLE MSG: %s' % msg)
 
 
 class Browser(object):
@@ -236,6 +196,7 @@ class Browser(object):
             request_obj.setRawHeader(name, value)
 
         # Make a request
+        self.content_type_stats = Counter()
         self.view.load(request_obj, method_obj, data)
 
         loop.exec_()
@@ -244,7 +205,6 @@ class Browser(object):
             request_resource = None
             url = str(self.page.mainFrame().url().toString()).rstrip('/')
             for res in self.resource_list:
-                print('RES URL', res.url)
                 if url == res.url or url == res.url.rstrip('/'):
                     request_resource = res
                     break
@@ -265,7 +225,7 @@ class Browser(object):
         doc.headers = decode_dict(res.headers)
         doc.cookies = decode_dict(self.get_cookies())
         doc.parse()
-        doc._page = self.page
+        doc.page = self.page
         return doc
 
     #def __del__(self):
@@ -283,3 +243,6 @@ class Browser(object):
             except AttributeError:
                 data = reply.readAll()
             self.resource_list.append(HttpResource(reply))
+            ctype = reply.rawHeader('Content-Type').data()\
+                         .decode('latin').split(';')[0]
+            self.content_type_stats[ctype] += 1

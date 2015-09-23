@@ -17,6 +17,18 @@ from wkit.logger import log_errors
 logger = logging.getLogger('wkit.network')
 
 
+@log_errors
+def handle_reply_ready_read(reply):
+    ct = reply.rawHeader('Content-Type').data().decode('latin')
+    if ct.startswith('image/'):
+        logger.debug('ABORTING %s' % reply.url().toString())
+        reply.abort()
+    else:
+        if not hasattr(reply, 'data'):
+            reply.data = b''
+        reply.data += reply.peek(reply.bytesAvailable())
+
+
 class WKitNetworkAccessManager(QNetworkAccessManager):
     @log_errors
     def __init__(self, forbidden_extensions=None):
@@ -67,8 +79,12 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
                 allowed = False
 
         if allowed:
-            print('PROXY', self.proxy())
-            logger.debug('%s %s' % (method.upper(), req_url))
+            if self.proxy().hostName():
+                suffix = ' via proxy %s:%d' % (self.proxy().hostName(),
+                                               self.proxy().port())
+            else:
+                suffix = ''
+            logger.debug('%s %s%s' % (method.upper(), req_url, suffix))
         else:
             logger.debug('FORBIDDEN %s' % req_url)
         
@@ -76,15 +92,8 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
                              QNetworkRequest.PreferCache)
         reply = QNetworkAccessManager.createRequest(self, operation, request, data)
         reply.error.connect(self.handle_network_reply_error)
-        reply.readyRead.connect(lambda x=reply: self.handle_reply_ready_read(x))
+        reply.readyRead.connect(lambda x=reply: handle_reply_ready_read(x))
         return reply
-
-    @log_errors
-    def handle_reply_ready_read(self, reply):
-        if not hasattr(reply, 'data'):
-            reply.data = b''
-        reply.data += reply.peek(reply.bytesAvailable())
-
 
     @log_errors
     def is_request_allowed(self, request):
@@ -103,6 +112,5 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
     def handle_network_reply_error(self, err_code):
         #if eid not in (5, 301):
         reply = self.sender()
-        err_msg = NETWORK_ERRORS.get(err_code, 'Unknown Error') 
-        logger.error('FAIL [%s: %s] %s' % (err_code, err_msg,
-                                           reply.url().toString()))
+        #err_msg = NETWORK_ERRORS.get(err_code, 'Unknown Error') 
+        logger.error('FAIL [%s] %s' % (err_code, reply.url().toString()))
