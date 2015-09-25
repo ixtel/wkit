@@ -31,7 +31,8 @@ class HttpResponse(object):
             status_code = obj.status_code.toInt()[0]
         headers = {}
         for header in reply.rawHeaderList():
-            headers[header.data()] = bytes(reply.rawHeader(header))
+            value = reply.rawHeader(header).data().decode('latin')
+            headers[header.data().decode('latin')] = value 
         content = cls.extract_content_from_reply(reply)
         return cls(
             url=url,

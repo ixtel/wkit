@@ -12,7 +12,7 @@ def click(url=None, proxy=None):
     traffic_rules = {
         'reject_url': [],
         'reject_path': [],
-        'abort_content_type': ['image/*'],
+        #'abort_content_type': ['image/*'],
     }
     br = Browser(gui=GUI, traffic_rules=traffic_rules)
     doc = br.go(url, timeout=20, proxy=proxy)
@@ -31,8 +31,7 @@ def main(**kwargs):
     proxy = pl.get_random_proxy()
 
     urls = [
-        'http://yandex.ru/',
-        #'http://mail.ru/',
+        'http://jabbim.com',
     ]
 
     pool = []

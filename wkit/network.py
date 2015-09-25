@@ -13,12 +13,15 @@ from fnmatch import fnmatch
 from copy import copy
 from urllib.parse import urlsplit
 import zlib
+import itertools
 
 from wkit.const import NETWORK_ERRORS
 from wkit.error import WKitError
 from wkit.logger import log_errors
 
 logger = logging.getLogger('wkit.network')
+logger_rules = logging.getLogger('wkit.network.rules')
+REQ_COUNTER = itertools.count(1)
 
 
 @log_errors
@@ -26,7 +29,7 @@ def handle_reply_ready_read(reply, traffic_rules):
     ct = reply.rawHeader('Content-Type').data().decode('latin')
     abort_ctype = traffic_rules.get('abort_content_type', [])
     if any(fnmatch(ct, x) for x in abort_ctype):
-        logger.debug('ABORT REPLY %s' % reply.url().toString())
+        logger_rules.debug('ABORT REPLY %s' % reply.url().toString())
         reply.abort()
     else:
         if not hasattr(reply, 'data'):
@@ -90,9 +93,10 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
                                                self.proxy().port())
             else:
                 suffix = ''
-            logger.debug('%s %s%s' % (method.upper(), req_url, suffix))
+            logger.debug('%s [%d] %s%s' % (method.upper(), next(REQ_COUNTER),
+                                           req_url, suffix))
         else:
-            logger.debug('REJECT REQ %s' % req_url)
+            logger_rules.debug('REJECT REQ %s' % req_url)
         
         request.setAttribute(QNetworkRequest.CacheLoadControlAttribute,
                              QNetworkRequest.PreferCache)
@@ -122,4 +126,4 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
         #if eid not in (5, 301):
         reply = self.sender()
         #err_msg = NETWORK_ERRORS.get(err_code, 'Unknown Error') 
-        logger.error('FAIL [%s] %s' % (err_code, reply.url().toString()))
+        logger_rules.debug('FAIL [%s] %s' % (err_code, reply.url().toString()))
