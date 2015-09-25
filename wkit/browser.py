@@ -5,16 +5,20 @@ Credits:
 """
 from PyQt4.QtCore import (QEventLoop, QUrl, QTimer, QByteArray,
                           QSize, qInstallMsgHandler, QtDebugMsg, QtWarningMsg,
-                          QtCriticalMsg, QtFatalMsg)
+                          QtCriticalMsg, QtFatalMsg, QPoint)
 from PyQt4.QtGui import QApplication
 from PyQt4.QtWebKit import QWebView, QWebPage
 from PyQt4.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
                              QNetworkCookieJar, QNetworkCookie)
+from PyQt4.QtTest import QTest
 import logging
 from six.moves.urllib.parse import urlsplit, urljoin
 from collections import Counter
 from random import choice
 import time
+from threading import Thread
+import codecs
+import weakref
 
 from wkit.network import WKitNetworkAccessManager
 from wkit.error import (WKitError, InternalError,
@@ -22,6 +26,10 @@ from wkit.error import (WKitError, InternalError,
 from wkit.logger import configure_logger
 from wkit.response import HttpResponse
 import wkit
+from wkit.mouse_mixin import MouseMixin
+from wkit.position_mixin import PositionMixin
+from wkit.wait_mixin import WaitMixin
+from wkit.javascript_mixin import JavaScriptMixin
 
 logger = logging.getLogger('wkit')
 logger_response = logging.getLogger('wkit.network.response')
@@ -87,13 +95,36 @@ class WKitWebPage(QWebPage):
         logger.error('JS CONSOLE MSG: %s' % msg)
 
 
-class Browser(object):
-    _app = None
+class WKitScope(object):
+    app = None
 
+    def __init__(self):
+        WKitScope.app = QApplication.instance() or QApplication([])
+        self.stop = False
+        self.thread = Thread(target=self.run)
+        self.thread.start()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop = True
+        return False
+
+    def run(self):
+        self.app.processEvents()
+        while not self.stop:
+            while self.app.hasPendingEvents():
+                self.app.processEvents()
+            time.sleep(0.01)
+
+
+class Browser(MouseMixin, PositionMixin, WaitMixin, JavaScriptMixin):
     def __init__(self, gui=False, traffic_rules=None):
-        if not Browser._app:
-            Browser._app = QApplication([])
-
+        if not WKitScope.app:
+            raise InternalError('You should use Browser instance'
+                                ' inside `with WKitScope():` block')
+        self.app = WKitScope.app
         self.manager = WKitNetworkAccessManager(traffic_rules=traffic_rules)
         self.manager.finished.connect(self.handle_finished_network_reply)
 
@@ -102,17 +133,21 @@ class Browser(object):
 
         self.page = WKitWebPage()
         self.page.setNetworkAccessManager(self.manager)
+        self.page.loadFinished.connect(self.handle_page_load_finished)
 
         self.view = WKitWebView()
         self.view.setPage(self.page)
-        self.view.setApplication(Browser._app)
-        self.view.loadFinished.connect(self.handle_page_load_finished)
-
+        self.view.setApplication(self.app)
         self._response = None
-
+        self.gui = gui
         if gui:
             self.view.show()
 
+    #def __del__(self):
+    #    self.view.close()
+    #    self.view.setPage(None)
+    #    del self.view
+    #    del self.page
 
     def get_cookies(self):
         return self.cookie_jar.allCookies()
@@ -135,7 +170,7 @@ class Browser(object):
         # Reset things bound to previous response
         self._response = None
         self.resource_list = []
-        self.page_loaded = False
+        self._page_loaded = False
         #self.view.setHtml('', QUrl('blank://'))
 
         # Proxy
@@ -198,46 +233,12 @@ class Browser(object):
         start = time.time()
         while time.time() < start + sleep_time:
             time.sleep(0.01)
-            self._app.processEvents()
-
-    def wait_for(self, event, timeout_msg='Time is up!',
-                 timeout=None):
-        if timeout is None:
-            timeout = DEFAULT_WAIT_TIMEOUT
-        start = time.time()
-        while not event():
-            if time.time() > start + timeout:
-                raise WaitTimeout(timeout_msg)
-            self.sleep(0.1)
-
-    def wait_for_page_loaded(self, timeout=None):
-        self.wait_for(lambda: self.page_loaded,
-                      'Unable to load the page', timeout)
-
-    def wait_for_element(self, query, timeout=None):
-        self.wait_for(lambda: self.element_exists(query),
-                      'Can\'t find element: %s' % query,
-                      timeout)
+            self.app.processEvents()
 
     def get_url(self):
         return self.page.mainFrame().url().toString()\
                    .split('#')[0].rstrip('/')
 
-    def wait_for_response(self, timeout=None):
-        self._response = None
-
-        def event():
-            url = self.get_url()
-            for res in self.resource_list:
-                if url == res.url.rstrip('/'):
-                    self._response = res
-                    return True
-            return False
-
-        self.wait_for(event, 'Can\'t find response associated'
-                             ' with current web document: %s' % self.get_url(),
-                      timeout)
-        return self._response
 
     def get_page_response(self):
         if self._response:
@@ -257,21 +258,6 @@ class Browser(object):
         print('Current page URL: %s' % self.page.mainFrame().url().toString())
         raise InternalError('Could not associate any of loaded responses'
                             ' with requested URL: %s' % url)
-
-    def handle_page_load_finished(self):
-        self.page_loaded = True
-
-    def handle_finished_network_reply(self, reply):
-        status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-        if status_code:
-            if not isinstance(status_code, int):
-                status_code = status_code.toInt()[0]
-            logger_response.debug('HttpResource [%d]: %s' % (status_code,
-                                                             reply.url().toString()))
-            self.resource_list.append(HttpResponse.build_from_reply(reply))
-            ctype = reply.rawHeader('Content-Type').data()\
-                         .decode('latin').split(';')[0]
-            self.content_type_stats[ctype] += 1
 
     def assert_ok_response(self):
         if self.get_page_response().status_code != 200:
@@ -326,3 +312,30 @@ class Browser(object):
             return choice(links)
         else:
             return None
+
+    # **************
+    # Event Handlers
+    # **************
+
+    def handle_page_load_finished(self):
+        self._page_loaded = True
+        if self.gui:
+            scripts = []
+            if False:#self.jquery_namespace:
+                scripts.append('jquery-1.9.1.min.js', )
+
+                for script in scripts:
+                    self.evaluate_js_file(os.path.dirname(__file__) + '/js/' + script)
+                self.evaluate(u"WKit = jQuery.noConflict();" % self.jquery_namespace)
+
+    def handle_finished_network_reply(self, reply):
+        status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        if status_code:
+            if not isinstance(status_code, int):
+                status_code = status_code.toInt()[0]
+            logger_response.debug('HttpResource [%d]: %s' % (status_code,
+                                                             reply.url().toString()))
+            self.resource_list.append(HttpResponse.build_from_reply(reply))
+            ctype = reply.rawHeader('Content-Type').data()\
+                         .decode('latin').split(';')[0]
+            self.content_type_stats[ctype] += 1

@@ -81,6 +81,8 @@ class WKitNetworkAccessManager(QNetworkAccessManager):
         method = self.get_method_name(operation)
         allowed = True 
         req_url = request.url().toString()
+        if req_url.startswith('data:'):
+            req_url = 'data:[%s...]' % req_url[:50]
 
         if operation == self.GetOperation:
             if not self.is_request_allowed(request):
